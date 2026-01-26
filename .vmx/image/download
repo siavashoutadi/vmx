@@ -1,0 +1,49 @@
+#!/bin/bash
+
+set -eo pipefail
+
+# Source the library
+source "$(dirname "$0")/_lib"
+
+if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
+    print "${BOLD}Download a VM image${NC}"
+    print ""
+    print "${BOLD}${CYAN}Usage:${NC} vmx image download [OPTIONS]${NC}"
+    print ""
+    printYellow "Options:"
+    print "  --distro DISTRO                 Linux distribution (required)"
+    print "  --version VERSION               Distribution version (required)"
+    print ""
+    printYellow "Supported Images:"
+    print "  ubuntu: 20.04, 22.04, 24.04"
+    print "  debian: 11, 12"
+    print "  fedora: 38, 39, 40"
+    print ""
+    printYellow "Examples:"
+    print "  vmx image download --distro debian --version 12"
+    print "  vmx image download --distro fedora --version 40"
+    print "  vmx image download --distro ubuntu --version 24.04"
+    exit 0
+fi
+
+# Parse options
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --distro) distro="$2"; shift 2 ;;
+        --version) version="$2"; shift 2 ;;
+        *) printRed "Unknown option: $1"; exit 1 ;;
+    esac
+done
+
+# Require both distro and version
+if [[ -z "$distro" ]]; then
+    printRed "✗ Missing required option: --distro"
+    exit 1
+fi
+
+if [[ -z "$version" ]]; then
+    printRed "✗ Missing required option: --version"
+    exit 1
+fi
+
+_download_image "${distro}" "${version}"

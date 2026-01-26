@@ -1,0 +1,55 @@
+#!/bin/bash
+
+set -eo pipefail
+
+source "$(dirname "$0")/_lib"
+
+if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
+    print ""
+    print "${BOLD}List downloaded VM images${NC}"
+    print ""
+    print "${BOLD}${CYAN}Usage:${NC} vmx image list${NC}"
+    print ""
+    print "Shows all downloaded and available images."
+    print ""
+    exit 0
+fi
+
+# Create associative array of downloaded images
+declare -A downloaded_images
+
+if [[ -d "$VMX_IMAGES_DIR" ]]; then
+    for distro_dir in "$VMX_IMAGES_DIR"/*; do
+        if [[ -d "$distro_dir" ]]; then
+            distro=$(basename "$distro_dir")
+            for version_dir in "$distro_dir"/*; do
+                if [[ -d "$version_dir" && -f "$version_dir/image.qcow2" ]]; then
+                    version=$(basename "$version_dir")
+                    downloaded_images["${distro}:${version}"]=1
+                fi
+            done
+        fi
+    done
+fi
+
+# Display available images as a table
+print "${BOLD}Available Images:${NC}"
+print ""
+printf "  ${BOLD}%-20s %-10s %-12s${NC}\n" "IMAGE" "VERSION" "DOWNLOADED"
+printf "  ${BOLD}%-20s %-10s %-12s${NC}\n" "$(printf '%0.s-' {1..20})" "$(printf '%0.s-' {1..10})" "$(printf '%0.s-' {1..12})"
+
+# Display images in a table format (sorted)
+for key in $(echo "${!IMAGE_URLS[@]}" | tr ' ' '\n' | sort); do
+    distro=$(echo "$key" | cut -d: -f1)
+    version=$(echo "$key" | cut -d: -f2)
+
+    if [[ -n "${downloaded_images[$key]}" ]]; then
+        status="${GREEN}✓${NC}"
+    else
+        status="${RED}✗${NC}"
+    fi
+
+    printf "  ${CYAN}%-20s${NC} ${YELLOW}%-10s${NC} %b\n" "$distro" "$version" "$status"
+done
+
+print ""

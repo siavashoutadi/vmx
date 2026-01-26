@@ -1,0 +1,243 @@
+#!/bin/bash
+
+set -eo pipefail
+
+# Configuration
+CONFIG_FILE="$(dirname "$0")/images.conf"
+
+# Declare associative arrays
+declare -A IMAGE_URLS
+declare -A OSINFO_VARIANTS
+declare -A CHECKSUM_URLS
+
+# Load image configuration from INI file
+_load_image_config() {
+    config_file="$1"
+
+    if [[ ! -f "$config_file" ]]; then
+        printRed "Config file not found: $config_file"
+        exit 1
+    fi
+
+    current_section=""
+    while IFS='=' read -r key value; do
+        # Skip comments and empty lines
+        [[ "$key" =~ ^[[:space:]]*# ]] && continue
+        [[ -z "$key" ]] && continue
+
+        # Handle section headers [image:version]
+        if [[ "$key" =~ ^\[.*\]$ ]]; then
+            current_section="${key//[\[\]]/}"
+        else
+            # Trim whitespace
+            key=$(echo "$key" | xargs)
+            value=$(echo "$value" | xargs)
+
+            if [[ "$key" == "url" ]]; then
+                IMAGE_URLS["$current_section"]="$value"
+            elif [[ "$key" == "osinfo" ]]; then
+                OSINFO_VARIANTS["$current_section"]="$value"
+            elif [[ "$key" == "checksum_url" ]]; then
+                CHECKSUM_URLS["$current_section"]="$value"
+            fi
+        fi
+    done < "$config_file"
+}
+
+# Load config on source
+_load_image_config "$CONFIG_FILE"
+
+_get_osinfo_variant() {
+    distro="$1"
+    version="$2"
+    key="${distro}:${version}"
+
+    echo "${OSINFO_VARIANTS[$key]:-generic}"
+}
+
+_get_image_metadata() {
+    distro="$1"
+    version="$2"
+    key="$3"  # optional: specific key to extract
+    image_dir="${VMX_IMAGES_DIR}/${distro}/${version}"
+    image_json="${image_dir}/image.json"
+
+    if [[ ! -f "${image_json}" ]]; then
+        return
+    fi
+
+    if [[ -z "$key" ]]; then
+        # Return the entire JSON
+        cat "${image_json}"
+    else
+        # Return specific key value using jq, or fallback to grep if jq not available
+        if command -v jq &>/dev/null; then
+            jq -r ".${key}" "${image_json}" 2>/dev/null || true
+        else
+            grep "\"${key}\"" "${image_json}" 2>/dev/null | sed 's/.*"'\"${key}\"'\": "\(.*\)".*/\1/' || true
+        fi
+    fi
+}
+
+_get_checksum_from_remote() {
+    distro="$1"
+    version="$2"
+    filename="$3"
+    key="${distro}:${version}"
+    checksum_url="${CHECKSUM_URLS[$key]:-}"
+
+    if [[ -z "$checksum_url" ]]; then
+        return 1
+    fi
+
+    temp_checksum="/tmp/vmx-checksum-${distro}-${version}.tmp"
+
+    if ! curl -s -L -o "${temp_checksum}" "${checksum_url}" 2>/dev/null; then
+        rm -f "${temp_checksum}"
+        return 1
+    fi
+
+    # Extract checksum for the filename from various formats
+    remote_checksum=""
+
+    # Try SHA256SUMS format (Ubuntu)
+    if grep -q "${filename}" "${temp_checksum}" 2>/dev/null; then
+        remote_checksum=$(grep "${filename}" "${temp_checksum}" | awk '{print $1}')
+    fi
+
+    # Try SHA512SUMS format (Debian)
+    if [[ -z "$remote_checksum" ]] && grep -q "${filename}" "${temp_checksum}" 2>/dev/null; then
+        remote_checksum=$(grep "${filename}" "${temp_checksum}" | awk '{print $1}')
+    fi
+
+    rm -f "${temp_checksum}"
+
+    if [[ -z "$remote_checksum" ]]; then
+        return 1
+    fi
+
+    echo "$remote_checksum"
+}
+
+_verify_checksum() {
+    file_path="$1"
+    expected_checksum="$2"
+
+    if [[ -z "$expected_checksum" ]]; then
+        return 0
+    fi
+
+    actual_checksum=$(sha256sum "${file_path}" | awk '{print $1}')
+
+    if [[ "$actual_checksum" != "$expected_checksum" ]]; then
+        printRed "✗ Checksum mismatch!" >&2
+        printRed "  Expected: ${expected_checksum}" >&2
+        printRed "  Actual:   ${actual_checksum}" >&2
+        return 1
+    fi
+
+    return 0
+}
+
+_download_image() {
+    distro="$1"
+    version="$2"
+    image_dir="${VMX_IMAGES_DIR}/${distro}/${version}"
+
+    if [[ -f "${image_dir}/image.qcow2" ]]; then
+        printGreen "✓ Image already exists: ${distro}:${version}"
+        return 0
+    fi
+
+    # Create image directory (requires sudo for /var/lib/libvirt)
+    sudo mkdir -p "${image_dir}"
+
+    key="${distro}:${version}"
+    url="${IMAGE_URLS[$key]:-}"
+
+    if [[ -z "$url" ]]; then
+        printRed "✗ Unknown image ${distro}:${version}"
+        "$(dirname "$0")/list"
+        exit 1
+    fi
+
+    # Extract filename from URL
+    filename=$(basename "${url}")
+
+    print ""
+    printCyan "Downloading image ${distro}:${version} ..."
+    print ""
+    print "${CYAN}Source:${NC} ${url}"
+
+    # Get remote checksum
+    remote_checksum=$(_get_checksum_from_remote "${distro}" "${version}" "${filename}" 2>/dev/null || echo "")
+    if [[ -n "$remote_checksum" ]]; then
+        print "${CYAN}Remote SHA256:${NC} ${remote_checksum}"
+    fi
+    print ""
+
+    temp_file="/tmp/vmx-image-${distro}-${version}.tmp"
+
+    if ! curl -L -o "${temp_file}" "${url}"; then
+        rm -f "${temp_file}"
+        printRed "✗ Failed to download image"
+        exit 1
+    fi
+
+    print ""
+    print "✓ ${CYAN}Downloaded to:${NC} ${temp_file}"
+    file_size=$(du -h "${temp_file}" | awk '{print $1}')
+    print "✓ ${CYAN}File size:${NC} ${file_size}"
+    print ""
+
+    # Verify checksum if available
+    if [[ -n "$remote_checksum" ]]; then
+        if ! _verify_checksum "${temp_file}" "${remote_checksum}"; then
+            rm -f "${temp_file}"
+            printRed "✗ Download aborted due to checksum mismatch"
+            exit 1
+        fi
+        printGreen "✓ Checksum verified"
+    fi
+
+    # Convert to qcow2 if needed and move to final location
+    if [[ "${temp_file}" == *.img ]]; then
+        print "Converting to qcow2 format ..."
+        sudo qemu-img convert -f qcow2 -O qcow2 "${temp_file}" "${image_dir}/image.qcow2"
+        rm -f "${temp_file}"
+    else
+        sudo mv "${temp_file}" "${image_dir}/image.qcow2"
+    fi
+
+    sudo chmod 644 "${image_dir}/image.qcow2"
+
+    printGreen "✓ Image downloaded successfully into ${image_dir}/image.qcow2"
+    print ""
+
+    # Always update image.json with current metadata and remote checksum
+    osinfo_variant=$(_get_osinfo_variant "${distro}" "${version}")
+    printCyan "Generating image metadata..."
+    echo ""
+    image_size=$(sudo stat -c%s "${image_dir}/image.qcow2" 2>/dev/null || echo "0")
+
+    cat > /tmp/image-${distro}-${version}.json << EOF
+{
+  "distro": "${distro}",
+  "version": "${version}",
+  "osinfo_variant": "${osinfo_variant}",
+  "url": "${IMAGE_URLS[${distro}:${version}]}",
+  "sha256": "${remote_checksum}",
+  "downloaded": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+  "size": ${image_size},
+}
+EOF
+    sudo mv /tmp/image-${distro}-${version}.json "${image_dir}/image.json"
+    printGreen "✓ Image metadata saved to ${image_dir}/image.json"
+}
+
+_list_available_images() {
+    echo "Available images:"
+    for img in "${!IMAGE_URLS[@]}"; do
+        echo "  $img"
+    done
+}
