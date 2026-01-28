@@ -1,0 +1,21 @@
+#!/bin/bash
+
+set -eo pipefail
+
+source "$(dirname "$0")/_lib"
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        -n|--name) vm_name="$2"; shift 2 ;;
+        *) printRed "Unknown option: $1"; exit 1 ;;
+    esac
+done
+
+if [[ -z "$vm_name" ]]; then
+    printRed "VM name is required (-n or --name)"
+    exit 1
+fi
+
+printCyan "Retrieving cloud-init files for VM: ${vm_name}"
+
+_show_cloudinit_files "${vm_name}"

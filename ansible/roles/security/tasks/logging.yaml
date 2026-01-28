@@ -1,0 +1,10 @@
+---
+# System logging configuration
+
+- name: Configure system log retention
+  lineinfile:
+    path: /etc/rsyslog.conf
+    regexp: "^#?\\$FileCreateMode"
+    line: "$FileCreateMode {{ log_retention_umask }}"
+    state: present
+  notify: restart rsyslog

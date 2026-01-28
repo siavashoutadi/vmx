@@ -1,0 +1,42 @@
+---
+# RedHat/Fedora specific tasks
+
+- name: Update package manager cache
+  package:
+    name: "*"
+    state: latest
+
+- name: Install security tools
+  package:
+    name: "{{ redhat_security_packages }}"
+    state: present
+
+- name: Enable firewalld
+  systemd:
+    name: firewalld
+    enabled: yes
+    state: started
+  when: firewall_enabled | bool
+
+- name: Allow SSH through firewalld
+  firewalld:
+    service: ssh
+    permanent: yes
+    state: enabled
+    immediate: yes
+  when: firewall_enabled | bool
+
+- name: Configure automatic security updates
+  copy:
+    content: |
+      apply_updates = yes
+      upgrade_type = security
+    dest: /etc/dnf/automatic.conf
+  when: auto_updates_enabled | bool
+
+- name: Enable dnf-automatic service
+  systemd:
+    name: dnf-automatic.timer
+    enabled: yes
+    state: started
+  when: auto_updates_enabled | bool

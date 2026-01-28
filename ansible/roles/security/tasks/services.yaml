@@ -1,0 +1,10 @@
+---
+# Disable unnecessary services
+
+- name: Disable unnecessary services
+  systemd:
+    name: "{{ item }}"
+    enabled: no
+    state: stopped
+  with_items: "{{ unnecessary_services }}"
+  ignore_errors: yes

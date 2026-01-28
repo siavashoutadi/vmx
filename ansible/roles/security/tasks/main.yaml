@@ -1,0 +1,33 @@
+---
+- name: Include OS-specific tasks
+  include_tasks: "{{ ansible_os_family | lower }}.yaml"
+  tags:
+    - security
+    - packages
+    - firewall
+    - updates
+
+- name: Configure fail2ban
+  include_tasks: fail2ban.yaml
+  tags:
+    - security
+    - fail2ban
+
+- name: Harden SSH configuration
+  include_tasks: ssh.yaml
+  tags:
+    - security
+    - ssh
+
+- name: Disable unnecessary services
+  include_tasks: services.yaml
+  when: disable_unnecessary_services | bool
+  tags:
+    - security
+    - services
+
+- name: Configure system logging
+  include_tasks: logging.yaml
+  tags:
+    - security
+    - logging

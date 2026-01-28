@@ -1,0 +1,37 @@
+---
+# Debian/Ubuntu specific tasks
+
+- name: Update package manager cache
+  apt:
+    update_cache: yes
+    cache_valid_time: 3600
+
+- name: Install security tools
+  package:
+    name: "{{ debian_security_packages }}"
+    state: present
+
+- name: Enable UFW firewall
+  ufw:
+    state: enabled
+    default: deny
+    direction: incoming
+  when: firewall_enabled | bool
+
+- name: Allow SSH through UFW
+  ufw:
+    rule: allow
+    port: '22'
+    proto: tcp
+  when: firewall_enabled | bool
+
+- name: Configure automatic security updates
+  copy:
+    content: |
+      APT::Periodic::Update-Package-Lists "1";
+      APT::Periodic::Download-Upgradeable-Packages "1";
+      APT::Periodic::AutocleanInterval "7";
+      APT::Periodic::Unattended-Upgrade "1";
+      APT::Periodic::Reboot "false";
+    dest: /etc/apt/apt.conf.d/50unattended-upgrades-auto
+  when: auto_updates_enabled | bool

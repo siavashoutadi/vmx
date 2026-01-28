@@ -1,0 +1,28 @@
+---
+# Default variables for security role
+
+# SSH Configuration
+ssh_permit_root_login: no
+ssh_password_authentication: no
+ssh_pubkey_authentication: yes
+ssh_x11_forwarding: no
+ssh_max_auth_tries: 3
+ssh_client_alive_interval: 300
+
+# Firewall Configuration
+firewall_enabled: yes
+firewall_default_deny_incoming: yes
+
+# fail2ban Configuration
+fail2ban_bantime: 3600
+fail2ban_findtime: 600
+fail2ban_maxretry: 5
+fail2ban_sshd_maxretry: 3
+fail2ban_enabled: yes
+
+# System hardening
+disable_unnecessary_services: yes
+log_retention_umask: "0640"
+
+# Auto-updates
+auto_updates_enabled: yes

@@ -1,0 +1,15 @@
+---
+# OS-specific variables
+
+debian_security_packages:
+  - ufw
+  - fail2ban
+  - unattended-upgrades
+
+redhat_security_packages:
+  - firewalld
+  - fail2ban
+  - dnf-automatic
+
+unnecessary_services:
+  - avahi-daemon

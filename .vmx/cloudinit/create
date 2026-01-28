@@ -1,0 +1,59 @@
+#!/bin/bash
+
+set -eo pipefail
+
+source "$(dirname "$0")/_lib"
+
+if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
+    print "${BOLD}${CYAN}Create cloud-init configuration files${NC}"
+    print ""
+    print "${BOLD}${CYAN}Usage:${NC} vmx cloudinit create [OPTIONS]"
+    print ""
+    print "${BOLD}${CYAN}Options:${NC}"
+    print "  ${GREEN}-n, --name${NC} NAME              VM name (required)"
+    print "  ${GREEN}-u, --username${NC} USERNAME      Username for cloud-init (default: vmx)"
+    print "  ${GREEN}-k, --ssh-pubkey${NC} KEY         SSH public key (required)"
+    print "  ${GREEN}-p, --packages${NC} PKGS          Comma-separated packages to install"
+    print "  ${GREEN}--ansible-url${NC} URL             Ansible playbook repository URL"
+    print "  ${GREEN}--playbook${NC} PLAYBOOK           Playbook filename to run (e.g., ubuntu.yml)"
+    print ""
+    print "${BOLD}${CYAN}Examples:${NC}"
+    print "  vmx cloudinit create -n myvm -k \"ssh-rsa AAAA...\""
+    print "  vmx cloudinit create -n webserver -u ubuntu -k \"ssh-rsa AAAA...\""
+    exit 0
+fi
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        -n|--name) vm_name="$2"; shift 2 ;;
+        -u|--username) username="$2"; shift 2 ;;
+        -k|--ssh-pubkey) ssh_pubkey="$2"; shift 2 ;;
+        -p|--packages) packages="$2"; shift 2 ;;
+        --ansible-url) ansible_url="$2"; shift 2 ;;
+        --playbook) playbook="$2"; shift 2 ;;
+        *) printRed "Unknown option: $1"; exit 1 ;;
+    esac
+done
+
+# Validate required arguments
+if [[ -z "$vm_name" ]]; then
+    printRed "VM name is required (-n or --name)"
+    exit 1
+fi
+
+if [[ -z "$ssh_pubkey" ]]; then
+    printRed "SSH public key is required (-k or --ssh-pubkey)"
+    exit 1
+fi
+
+_init_dirs "$vm_name"
+
+# Set defaults
+[[ -z "$username" ]] && { username="vmx"; printCyan "Username: ${username} (using default)"; } || true
+[[ -z "$ansible_url" ]] && { ansible_url="https://github.com/siavashoutadi/vmx.git"; } || true
+[[ -z "$playbook" ]] && { playbook="ansible/playbook.yaml"; } || true
+
+printCyan "Creating cloud-init files for VM: ${vm_name}"
+
+_generate_userdata "${vm_name}" "${username}" "${ssh_pubkey}" "${packages:-}" "${ansible_url:-}" "${playbook:-}"
+_generate_metadata "${vm_name}"

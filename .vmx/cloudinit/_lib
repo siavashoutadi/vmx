@@ -1,0 +1,103 @@
+#!/bin/bash
+
+set -eo pipefail
+
+_init_dirs() {
+    mkdir -p "${VMX_CLOUDINIT_DIR}/${1}"
+}
+
+_generate_userdata() {
+    vm_name="$1"
+    username="${2:-vmx}"
+    ssh_pubkey="${3:-}"
+    packages="${4:-}"
+    ansible_url="${5:-}"
+    playbook="${6:-}"
+    user_data_file="${VMX_CLOUDINIT_DIR}/${vm_name}/userdata.yaml"
+
+    # Build packages section if provided
+    packages_section=""
+    if [[ -n "$packages" ]]; then
+        packages_section="packages:"
+        IFS=',' read -ra pkg_array <<< "$packages"
+        for pkg in "${pkg_array[@]}"; do
+            # Trim whitespace
+            pkg=$(echo "$pkg" | xargs)
+            packages_section+=$'\n'"  - $pkg"
+        done
+        packages_section+=$'\n'
+    fi
+
+    # Build ansible section - now with defaults
+    ansible_section=""
+    if [[ -n "$ansible_url" && -n "$playbook" ]]; then
+        ansible_section="ansible:"
+        ansible_section+=$'\n'"  install_method: pip"
+        ansible_section+=$'\n'"  pull:"
+        ansible_section+=$'\n'"    - url: \"${ansible_url}\""
+        ansible_section+=$'\n'"      playbook_names: [${playbook}]"
+        ansible_section+=$'\n'
+    fi
+
+    cat > ${user_data_file} << EOF
+#cloud-config
+package_update: true
+package_upgrade: true
+${packages_section}
+${ansible_section}
+
+users:
+  - name: ${username}
+    sudo: ALL=(ALL) NOPASSWD:ALL
+    shell: /bin/bash
+    ssh_authorized_keys:
+      - $(cat ${ssh_pubkey})
+
+hostname: ${vm_name}
+fqdn: ${vm_name}.local
+
+runcmd:
+  - systemctl enable ssh
+  - systemctl start ssh
+EOF
+    printGreen "Generated userdata: ${user_data_file}"
+}
+
+_generate_metadata() {
+    vm_name="$1"
+
+    metadata_file="${VMX_CLOUDINIT_DIR}/${vm_name}/metadata.yaml"
+
+    cat > $metadata_file << EOF
+instance-id: $(uuidgen)
+local-hostname: ${vm_name}
+EOF
+    printGreen "Generated metadata: ${metadata_file}"
+}
+
+_show_cloudinit_files() {
+    vm_name="$1"
+    cloudinit_dir="${VMX_CLOUDINIT_DIR}/${vm_name}"
+
+    if [[ -f "$cloudinit_dir/userdata.yaml" ]]; then
+        print ""
+        print "${CYAN}#####################################"
+        print "######## ${BOLD}Cloud-init userdata ########"
+        print "#####################################${NC}"
+        print ""
+        cat "${cloudinit_dir}/userdata.yaml"
+    else
+        print "  (no userdata file found)"
+    fi
+
+    if [[ -f "$cloudinit_dir/metadata.yaml" ]]; then
+        print ""
+        print "${CYAN}#####################################"
+        print "######## ${BOLD}Cloud-init metadata ########"
+        print "#####################################${NC}"
+        print ""
+        cat "${cloudinit_dir}/metadata.yaml"
+    else
+        print "  (no metadata file found)"
+    fi
+}

@@ -26,6 +26,8 @@ fi
 ROOT_REPO_DIR=$(dirname "$commandDir")
 
 VMX_IMAGES_DIR="${VMX_IMAGES_DIR:-/var/lib/libvirt/images/vmx}"
+VMX_DATA_DIR="${VMX_DATA_DIR:-${HOME}/.local/share/vmx}"
+VMX_CLOUDINIT_DIR="${VMX_DATA_DIR}/cloudinit"
 
 # Color definitions
 RED='\033[0;31m'
@@ -187,7 +189,7 @@ fi
 
 # Export functions to child processes
 export -f logError logWarning logInfo logSuccess printColor printRed printYellow printCyan printGreen printBlue print
-export RED GREEN YELLOW BLUE CYAN BOLD NC ROOT_REPO_DIR VMX_IMAGES_DIR
+export RED GREEN YELLOW BLUE CYAN BOLD NC ROOT_REPO_DIR VMX_IMAGES_DIR VMX_DATA_DIR VMX_CLOUDINIT_DIR
 
 cmd="$command/$action $args"
 eval $cmd

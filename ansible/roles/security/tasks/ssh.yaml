@@ -1,0 +1,24 @@
+---
+# SSH hardening tasks
+
+- name: Harden SSH configuration
+  lineinfile:
+    path: /etc/ssh/sshd_config
+    regexp: "{{ item.regexp }}"
+    line: "{{ item.line }}"
+    state: present
+  with_items:
+    - { regexp: "^#?PermitRootLogin", line: "PermitRootLogin {{ ssh_permit_root_login | lower }}" }
+    - { regexp: "^#?PasswordAuthentication", line: "PasswordAuthentication {{ ssh_password_authentication | lower }}" }
+    - { regexp: "^#?PubkeyAuthentication", line: "PubkeyAuthentication {{ ssh_pubkey_authentication | lower }}" }
+    - { regexp: "^#?X11Forwarding", line: "X11Forwarding {{ ssh_x11_forwarding | lower }}" }
+    - { regexp: "^#?MaxAuthTries", line: "MaxAuthTries {{ ssh_max_auth_tries }}" }
+    - { regexp: "^#?ClientAliveInterval", line: "ClientAliveInterval {{ ssh_client_alive_interval }}" }
+  notify: restart ssh
+
+- name: Set SSH file permissions
+  file:
+    path: /etc/ssh/sshd_config
+    mode: '0600'
+    owner: root
+    group: root
