@@ -8,10 +8,10 @@
     line: "{{ item.line }}"
     state: present
   with_items:
-    - { regexp: "^#?PermitRootLogin", line: "PermitRootLogin {{ ssh_permit_root_login | lower }}" }
-    - { regexp: "^#?PasswordAuthentication", line: "PasswordAuthentication {{ ssh_password_authentication | lower }}" }
-    - { regexp: "^#?PubkeyAuthentication", line: "PubkeyAuthentication {{ ssh_pubkey_authentication | lower }}" }
-    - { regexp: "^#?X11Forwarding", line: "X11Forwarding {{ ssh_x11_forwarding | lower }}" }
+    - { regexp: "^#?PermitRootLogin", line: "PermitRootLogin {% if ssh_permit_root_login %}yes{% else %}no{% endif %}" }
+    - { regexp: "^#?PasswordAuthentication", line: "PasswordAuthentication {% if ssh_password_authentication %}yes{% else %}no{% endif %}" }
+    - { regexp: "^#?PubkeyAuthentication", line: "PubkeyAuthentication {% if ssh_pubkey_authentication %}yes{% else %}no{% endif %}" }
+    - { regexp: "^#?X11Forwarding", line: "X11Forwarding {% if ssh_x11_forwarding %}yes{% else %}no{% endif %}" }
     - { regexp: "^#?MaxAuthTries", line: "MaxAuthTries {{ ssh_max_auth_tries }}" }
     - { regexp: "^#?ClientAliveInterval", line: "ClientAliveInterval {{ ssh_client_alive_interval }}" }
   notify: restart ssh

@@ -1,0 +1,165 @@
+#!/bin/bash
+
+set -eo pipefail
+
+if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
+    cat <<EOF
+${BOLD}Create a new VM${NC}
+
+${BOLD}Usage:${NC} vmx vm create [OPTIONS]
+
+${BOLD}Options:${NC}
+  -n, --name NAME              VM name (required)
+  -c, --cpu CORES              Number of CPU cores (default: 2)
+  -m, --memory MEMORY          Memory size (default: 2G)
+  -d, --disk DISK_SPEC         Disk specification (default: 10G)
+                               Format: ROOT_SIZE[,EXTRA_SIZE/MOUNT_POINT,...]
+                               Example: 10G,20G/data,30G/data2
+  --distro DISTRO              Linux distribution (default: ubuntu)
+  --version VERSION            Distribution version (default: 24.04)
+  --username USERNAME          Username for cloud-init (default: distro-specific)
+  --ssh-pubkey FILE            SSH public key file (default: ~/.ssh/id_rsa.pub)
+  --userdata FILE              Custom cloud-init userdata file
+  --metadata FILE              Custom cloud-init metadata file
+
+${BOLD}Examples:${NC}
+  vmx vm create -n myvm -c 4 -m 8G
+  vmx vm create -n webserver --distro debian --version 12
+  vmx vm create -n storage -d 20G,100G/data
+EOF
+    exit 0
+fi
+
+# Parse options
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        -n|--name) vm_name="$2"; shift 2 ;;
+        -c|--cpu) cpu="$2"; shift 2 ;;
+        -m|--memory) memory="$2"; shift 2 ;;
+        -d|--disk) disk_spec="$2"; shift 2 ;;
+        --distro) distro="$2"; shift 2 ;;
+        --version) version="$2"; shift 2 ;;
+        --userdata) userdata_file="$2"; shift 2 ;;
+        --metadata) metadata_file="$2"; shift 2 ;;
+        *) printRed "Unknown option: $1"; exit 1 ;;
+    esac
+done
+
+# Validate required arguments
+if [[ -z "$vm_name" ]]; then
+    printRed "VM name is required (-n or --name)"
+    exit 1
+fi
+
+# Check if VM already exists
+if virsh list --all 2>/dev/null | grep -q "^\s*-\s*${vm_name}\s\|^\s*[0-9]\+\s*${vm_name}\s"; then
+    printRed "VM '${vm_name}' already exists"
+    exit 1
+fi
+
+# Set defaults if not provided
+[[ -z "$cpu" ]] && { cpu="2"; printCyan "CPU cores: ${cpu} (using default)"; } || true
+[[ -z "$memory" ]] && { memory="2G"; printCyan "Memory: ${memory} (using default)"; } || true
+[[ -z "$disk_spec" ]] && { disk_spec="10G"; printCyan "Disk: ${disk_spec} (using default)"; } || true
+[[ -z "$distro" ]] && { distro="ubuntu"; printCyan "Distribution: ${distro} (using default)"; } || true
+[[ -z "$version" ]] && { version="24.04"; printCyan "Version: ${version} (using default)"; } || true
+default_userdata="${VMX_CLOUDINIT_DIR}/${vm_name}/userdata.yaml"
+default_metadata="${VMX_CLOUDINIT_DIR}/${vm_name}/metadata.yaml"
+if [[ -z "$userdata_file" && -z "$metadata_file" ]]; then
+    "$(dirname "$0")/../cloudinit/create" -n "$vm_name" -k "$HOME/.ssh/id_rsa.pub"
+fi
+
+userdata="${userdata_file:-$default_userdata}"
+metadata="${metadata_file:-$default_metadata}"
+
+"$(dirname "$0")/../image/download" --distro "$distro" --version "$version"
+
+root_size=$(echo "$disk_spec" | head -1)
+extra_disks=$(echo "$disk_spec" | tail -n +2)
+
+printCyan "Creating VM '${vm_name}' with '${cpu}' CPU, '${memory}' RAM, '${root_size}' root disk on '${distro}:${version}'"
+
+instance_dir="${VMX_INSTANCES_DIR}/${vm_name}"
+sudo -u libvirt-qemu mkdir -p "${instance_dir}"
+sudo -u libvirt-qemu chmod 755 "${instance_dir}" 2>/dev/null || true
+
+
+image_dir="${VMX_IMAGES_DIR}/${distro}/${version}"
+# Create root disk (CoW overlay)
+root_disk="${instance_dir}/root.qcow2"
+sudo -u libvirt-qemu qemu-img create -f qcow2 -b "${image_dir}/image.qcow2" -F qcow2 "${root_disk}"
+sudo -u libvirt-qemu qemu-img resize "${root_disk}" "${root_size}" 2>/dev/null || true
+
+# Create extra disks
+disk_devices=()
+disk_index=1
+while IFS= read -r extra_disk; do
+    if [[ -z "$extra_disk" ]]; then
+        continue
+    fi
+
+    size="${extra_disk%/*}"
+    mount_point="${extra_disk#*/}"
+
+    if [[ -z "$mount_point" ]]; then
+        mount_point="/data$disk_index"
+    fi
+
+    disk_file="${instance_dir}/disk${disk_index}.qcow2"
+    sudo -u libvirt-qemu qemu-img create -f qcow2 -s "${size}" "${disk_file}"
+    sudo -u libvirt-qemu chmod 640 "${disk_file}" 2>/dev/null || true
+
+    disk_devices+=("--disk path=${disk_file},format=qcow2")
+    disk_index=$((disk_index + 1))
+done <<< "$extra_disks"
+
+# Ensure default network is active
+if virsh net-info default &>/dev/null; then
+    net_state=$(virsh net-info default 2>/dev/null | grep "Active:" | awk '{print $2}')
+    if [[ "$net_state" != "yes" ]]; then
+        printCyan "Activating default network..."
+        virsh net-start default 2>/dev/null || true
+    fi
+else
+    printYellow "default network not found, will attempt to create it"
+    virsh net-define /etc/libvirt/qemu/networks/default.xml 2>/dev/null || true
+    virsh net-start default 2>/dev/null || true
+fi
+
+source "$(dirname "$0")/../image/_lib"
+
+# Load image configuration
+config_file="$(dirname "$0")/../image/images.conf"
+_load_image_config "$config_file"
+
+osinfo_variant=$(_get_osinfo_variant "${distro}" "${version}")
+
+printCyan "Creating VM: ${vm_name}"
+
+virt-install \
+    --name "${vm_name}" \
+    --memory "${memory%G*}000" \
+    --vcpus "${cpu}" \
+    --disk "path=${root_disk},format=qcow2" \
+    ${disk_devices[@]:-} \
+    --cloud-init user-data="${userdata}",meta-data="${metadata}" \
+    --network network=default \
+    --os-variant "${osinfo_variant}" \
+    --noautoconsole \
+    --autostart
+
+# Save VM metadata
+sudo -u libvirt-qemu bash -c "cat > ${instance_dir}/config.json" << EOF
+{
+  "name": "${vm_name}",
+  "cpu": ${cpu},
+  "memory": "${memory}",
+  "disk_spec": "${disk_spec}",
+  "distro": "${distro}",
+  "version": "${version}",
+  "created": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+}
+EOF
+
+printGreen "VM created successfully: ${vm_name}"
+print "To connect: vmx vm ssh ${vm_name}"

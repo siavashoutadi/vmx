@@ -2,9 +2,6 @@
 
 set -eo pipefail
 
-# Configuration
-CONFIG_FILE="$(dirname "$0")/images.conf"
-
 # Declare associative arrays
 declare -A IMAGE_URLS
 declare -A OSINFO_VARIANTS
@@ -44,13 +41,17 @@ _load_image_config() {
     done < "$config_file"
 }
 
-# Load config on source
-_load_image_config "$CONFIG_FILE"
 
 _get_osinfo_variant() {
     distro="$1"
     version="$2"
     key="${distro}:${version}"
+
+    # Load config if not already loaded
+    if [[ ${#OSINFO_VARIANTS[@]} -eq 0 ]]; then
+        config_file="$(dirname "$0")/images.conf"
+        _load_image_config "$config_file"
+    fi
 
     echo "${OSINFO_VARIANTS[$key]:-generic}"
 }
@@ -150,7 +151,15 @@ _download_image() {
     fi
 
     # Create image directory (requires sudo for /var/lib/libvirt)
-    sudo mkdir -p "${image_dir}"
+    if [[ ! -d "${image_dir}" ]]; then
+        sudo mkdir -p "${image_dir}"
+    fi
+
+    # Load config if not already loaded
+    if [[ ${#IMAGE_URLS[@]} -eq 0 ]]; then
+        config_file="$(dirname "$0")/images.conf"
+        _load_image_config "$config_file"
+    fi
 
     key="${distro}:${version}"
     url="${IMAGE_URLS[$key]:-}"

@@ -3,18 +3,28 @@
 set -eo pipefail
 
 _init_dirs() {
-    mkdir -p "${VMX_CLOUDINIT_DIR}/${1}"
+    sudo -u libvirt-qemu mkdir -p "${VMX_CLOUDINIT_DIR}/${1}"
 }
 
 _generate_userdata() {
     vm_name="$1"
-    username="${2:-vmx}"
+    username="${2:-}"
     ssh_pubkey="${3:-}"
     packages="${4:-}"
     ansible_url="${5:-}"
     playbook="${6:-}"
     user_data_file="${VMX_CLOUDINIT_DIR}/${vm_name}/userdata.yaml"
 
+    # Generate random password and create hash
+    random_password=$(openssl rand -hex 8)
+    password_hash=$(openssl passwd -6 "${random_password}")
+
+    default_packages="git,ansible"
+    if [[ -z "$packages" ]]; then
+        packages="$default_packages"
+    else
+        packages="${packages},${default_packages}"
+    fi
     # Build packages section if provided
     packages_section=""
     if [[ -n "$packages" ]]; then
@@ -28,25 +38,26 @@ _generate_userdata() {
         packages_section+=$'\n'
     fi
 
-    # Build ansible section - now with defaults
-    ansible_section=""
+    # Build runcmd section for ansible-pull - now with defaults
+    runcmd_section=""
     if [[ -n "$ansible_url" && -n "$playbook" ]]; then
-        ansible_section="ansible:"
-        ansible_section+=$'\n'"  install_method: pip"
-        ansible_section+=$'\n'"  pull:"
-        ansible_section+=$'\n'"    - url: \"${ansible_url}\""
-        ansible_section+=$'\n'"      playbook_names: [${playbook}]"
-        ansible_section+=$'\n'
+        runcmd_section="  - ansible-pull -U \"${ansible_url}\" \"${playbook}\""
+        runcmd_section+=$'\n'
     fi
 
-    cat > ${user_data_file} << EOF
+    sudo -u libvirt-qemu bash -c "cat > ${user_data_file}" << EOF
 #cloud-config
 package_update: true
 package_upgrade: true
 ${packages_section}
-${ansible_section}
-
 users:
+  - name: rescue
+    passwd: ${password_hash}
+    sudo: ALL=(ALL) NOPASSWD:ALL
+    shell: /bin/bash
+    lock_passwd: false
+    chpasswd: { expire: False }
+    ssh_pwauth: True
   - name: ${username}
     sudo: ALL=(ALL) NOPASSWD:ALL
     shell: /bin/bash
@@ -59,8 +70,13 @@ fqdn: ${vm_name}.local
 runcmd:
   - systemctl enable ssh
   - systemctl start ssh
+${runcmd_section}
 EOF
+
+    sudo -u libvirt-qemu bash -c "echo '${random_password}' > ${VMX_CLOUDINIT_DIR}/${vm_name}/rescue-password"
+
     printGreen "Generated userdata: ${user_data_file}"
+    printGreen "Generated password file: ${VMX_CLOUDINIT_DIR}/${vm_name}/rescue-password"
 }
 
 _generate_metadata() {
@@ -68,7 +84,7 @@ _generate_metadata() {
 
     metadata_file="${VMX_CLOUDINIT_DIR}/${vm_name}/metadata.yaml"
 
-    cat > $metadata_file << EOF
+    sudo -u libvirt-qemu bash -c "cat > $metadata_file" << EOF
 instance-id: $(uuidgen)
 local-hostname: ${vm_name}
 EOF

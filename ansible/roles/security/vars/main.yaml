@@ -11,5 +11,4 @@ redhat_security_packages:
   - fail2ban
   - dnf-automatic
 
-unnecessary_services:
-  - avahi-daemon
+unnecessary_services: []

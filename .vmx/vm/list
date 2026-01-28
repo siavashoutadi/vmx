@@ -1,0 +1,48 @@
+#!/bin/bash
+
+set -eo pipefail
+
+if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
+    print "${BOLD}List all VMs${NC}"
+    print ""
+    print "${BOLD}${CYAN}Usage:${NC} vmx vm list${NC}"
+    print ""
+    print "Shows a list of all virtual machines with their status."
+    print ""
+    print "${BOLD}${CYAN}Output columns:${NC}"
+    print "  ${GREEN}Name${NC}                         VM name"
+    print "  ${GREEN}Distribution:Version${NC}         Distro and version (e.g. ubuntu:24.04)"
+    print "  ${GREEN}State${NC}                        VM state (running, stopped, etc.)"
+    print ""
+    print "${BOLD}${CYAN}Examples:${NC}"
+    print "  vmx vm list"
+    exit 0
+fi
+
+print "${BOLD}VMX Instances:${NC}"
+print ""
+printf "  ${BOLD}%-20s %-20s %-15s %-15s${NC}\n" "NAME" "IMAGE" "STATE" "IP ADDRESS"
+printf "  ${BOLD}%-20s %-20s %-15s %-15s${NC}\n" "$(printf '%0.s-' {1..20})" "$(printf '%0.s-' {1..20})" "$(printf '%0.s-' {1..15})" "$(printf '%0.s-' {1..15})"
+
+found=0
+for instance_dir in "${VMX_INSTANCES_DIR}"/*; do
+    if [[ -d "$instance_dir" ]]; then
+        vm_name=$(basename "$instance_dir")
+        config="${instance_dir}/config.json"
+
+        if [[ -f "$config" ]]; then
+            distro=$(grep -o '"distro": "[^"]*' "$config" | cut -d'"' -f4)
+            version=$(grep -o '"version": "[^"]*' "$config" | cut -d'"' -f4)
+            state=$(virsh domstate "$vm_name" 2>/dev/null || echo "stopped")
+            ip=$(virsh domifaddr "$vm_name" 2>/dev/null | grep ipv4 | awk '{print $4}' | cut -d/ -f1 || echo "-")
+
+            printf "  ${CYAN}%-20s${NC} ${YELLOW}%-20s${NC} ${GREEN}%-15s${NC} ${BLUE}%-15s${NC}\n" "$vm_name" "${distro}:${version}" "$state" "$ip"
+            found=1
+        fi
+    fi
+done
+
+print ""
+if [[ $found -eq 0 ]]; then
+    print "  (no instances)"
+fi

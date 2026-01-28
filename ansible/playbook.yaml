@@ -2,9 +2,9 @@
 # Main playbook that runs the security role
 
 - name: Apply Security Hardening
-  hosts: all
+  hosts: localhost
+  connection: local
   become: true
   gather_facts: yes
-
   roles:
     - security

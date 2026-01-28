@@ -4,6 +4,9 @@ set -eo pipefail
 
 source "$(dirname "$0")/_lib"
 
+# Load image configuration
+_load_image_config "$(dirname "$0")/images.conf"
+
 if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
     print ""
     print "${BOLD}List downloaded VM images${NC}"

@@ -1,0 +1,41 @@
+#!/bin/bash
+
+set -eo pipefail
+
+if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
+    print "${BOLD}Delete a VM${NC}"
+    print ""
+    print "${BOLD}${CYAN}Usage:${NC} vmx vm remove <vm_name>${NC}"
+    print ""
+    print "${BOLD}${CYAN}Arguments:${NC}"
+    print "  <vm_name>                    Name of the VM to delete"
+    print ""
+    print "${BOLD}${CYAN}Actions:${NC}"
+    print "  - Stop the VM if it's running"
+    print "  - Undefine it from libvirt"
+    print "  - Remove all instance files"
+    print ""
+    print "${BOLD}${CYAN}Examples:${NC}"
+    print "  vmx vm remove myvm"
+    print "  vmx vm remove webserver"
+    exit 0
+fi
+
+if [[ -z "${1:-}" ]]; then
+    print "${RED}VM name required${NC}"
+    exit 1
+fi
+
+vm_name="$1"
+instance_dir="${VMX_INSTANCES_DIR}/${vm_name}"
+
+print "Deleting VM: ${vm_name}"
+
+# Stop and undefine VM
+virsh destroy "${vm_name}" 2>/dev/null || true
+virsh undefine "${vm_name}" 2>/dev/null || true
+
+sudo -u libvirt-qemu rm -rf "${instance_dir}"
+sudo -u libvirt-qemu rm -rf "${VMX_CLOUDINIT_DIR}/${vm_name}"
+
+print "${GREEN}VM deleted successfully${NC}"
